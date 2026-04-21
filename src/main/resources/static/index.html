@@ -1,0 +1,278 @@
+!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>UTC & UTH Map Integration - FINAL</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css"/>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+    <style>
+        body, html {
+     margin:0;
+     padding:0;
+     height:100%;
+     overflow:hidden;
+ }
+ #map {
+     height:100vh;
+     width:100%;
+ }
+ #sidebar{
+     position:absolute;
+     top:0;
+     left:0;
+     width:350px;
+     height:100vh;
+     background:white;
+     z-index:1000;
+     display:flex;
+     flex-direction:column;
+     transition:0.3s;
+ }
+ #sidebar.hide{
+     transform:translateX(-100%);
+ }
+ .toggle-btn{
+     position:absolute;
+     top:15px;
+     left:365px;
+     z-index:1001;
+     background:white;
+     border:none;
+     border-radius:8px;
+     padding:10px;
+     box-shadow:0 2px 6px rgba(0,0,0,0.2);
+     transition:0.3s;
+ }
+ #sidebar.hide + .toggle-btn{
+     left:15px;
+ }
+ .custom-div-icon{
+     background:none !important;
+     border:none !important;
+ }
+ .map-icon-style{
+     font-size:22px;
+     text-shadow: 2px 2px 4px rgba(255,255,255,0.8);
+     filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));
+ }
+ .icon-parking{ color:#198754; }
+ .icon-building{ color:#0d6efd; }
+ #sidebar:not(.hide) ~ #map .leaflet-bottom.leaflet-right{
+     right:20px;
+ }
+ .leaflet-control-zoom{
+     box-shadow:0 2px 6px rgba(0,0,0,0.3);
+     border-radius:10px;
+     overflow:hidden;
+ }
+ .leaflet-control-zoom a{
+     background:white;
+     color:#333;
+     font-weight:bold;
+ }
+ .leaflet-control-zoom a:hover{
+     background:#f1f1f1;
+ }
+        .leaflet-top.leaflet-left .leaflet-control-zoom {
+    display: none !important;
+ }
+    </style>
+</head>
+<body>
+<div id="sidebar">
+    <div class="p-3">
+        <h5>📍 Bản đồ Nội bộ</h5>
+        <select id="schoolSelect" class="form-select mt-2">
+            <option value="21.028184,105.803834">UTC Hà Nội</option>
+            <option value="10.846391,106.794475">UTH TP.HCM</option>
+        </select>
+        <button onclick="setRoutingUI()" class="btn btn-success w-100 mt-3">🧭 Chỉ đường</button>
+    </div>
+    <div id="chat-messages" style="flex:1; overflow:auto; padding:10px;"></div>
+</div>
+<button class="toggle-btn btn btn-light" onclick="toggleSidebar()">☰</button>
+<div id="map"></div>
+<script>
+    let currentCampus = "uth";
+    let map = L.map('map').setView([10.846507230863544, 106.79459931176592], 18);
+    document.getElementById("schoolSelect").addEventListener("change", function () {
+        let c = this.value.split(",");
+        let lat = parseFloat(c[0]);
+        currentCampus = lat > 15 ? "utc" : "uth";
+        map.flyTo([lat, parseFloat(c[1])], 18);
+    });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    let locationLayers = [];
+    let routingControl = null;
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    fetch("/api/locations")
+    .then(r => r.json())
+    .then(data => {
+        data.forEach(loc => {
+            let polyData = JSON.parse(loc.polygon);
+            let drawingElements = [];
+            if (loc.code === "main_axis_utc") {
+                let line = L.polyline(polyData, {
+                    color: '#ff9f43',
+                    weight: 6
+                }).addTo(map);
+                line.bindPopup(`<b>${loc.name}</b>`);
+                drawingElements.push(line);
+            } else {
+                let p = L.polygon(polyData, {
+                    color: '#0d6efd'
+                }).addTo(map);
+                p.bindPopup(`<b>${loc.name}</b>`);
+                drawingElements.push(p);
+            }
+            locationLayers.push({
+                name: loc.name,
+                code: loc.code,
+                lat: loc.lat,
+                lng: loc.lng,
+                polys: drawingElements
+            });
+        });
+        appendIconsToMap();
+    });
+    function appendIconsToMap() {
+        locationLayers.forEach(loc => {
+            if (!loc.lat) return;
+            let iconHtml = '<i class="bi bi-geo-alt-fill map-icon-style"></i>';
+            if (loc.code && loc.code.includes("parking"))
+                iconHtml = '<i class="bi bi-p-square-fill map-icon-style icon-parking"></i>';
+            if (loc.code && loc.code.includes("axis"))
+                iconHtml = '<i class="bi bi-signpost map-icon-style icon-road"></i>';
+            let icon = L.divIcon({
+                html: iconHtml,
+                className: 'custom-div-icon'
+            });
+            let marker = L.marker([loc.lat, loc.lng], { icon }).addTo(map);
+            marker.bindPopup(`<b>${loc.name}</b>`);
+            loc.polys.push(marker);
+        });
+    }
+    function toggleSidebar() {
+        document.getElementById("sidebar").classList.toggle("hide");
+    }
+    function setRoutingUI() {
+        let options = locationLayers
+            .filter(l => l.code)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(l => `<option value="${l.name}">${l.name}</option>`)
+            .join("");
+        document.getElementById("chat-messages").innerHTML = `
+            <div style="background:#f4f4f4;padding:10px;border-radius:8px;">
+                <label>Điểm đi:</label>
+                <select id="startNode" class="form-select mb-1">${options}</select>
+                <label>Điểm đến:</label>
+                <select id="endNode" class="form-select mb-1">${options}</select>
+                <button onclick="confirmRoute()" class="btn btn-danger w-100 mt-2">
+                    📍 Tìm đường
+                </button>
+            </div>
+        `;
+    }
+    function confirmRoute() {
+        let startName = document.getElementById("startNode")?.value;
+        let endName = document.getElementById("endNode")?.value;
+        if (!startName || !endName) return;
+        let s = locationLayers.find(l => l.name === startName);
+        let e = locationLayers.find(l => l.name === endName);
+        if (!s || !e) return alert("Không tìm thấy tọa độ!");
+        if (routingControl) map.removeControl(routingControl);
+        if (window.currentAStarPath) map.removeLayer(window.currentAStarPath);
+        let latlngs = [
+            [s.lat, s.lng],
+            [e.lat, e.lng]
+        ];
+        window.currentAStarPath = L.polyline(latlngs, {
+            color: 'red',
+            weight: 5,
+            opacity: 0.85,
+            dashArray: '10, 15'
+        }).addTo(map);
+        map.fitBounds(window.currentAStarPath.getBounds(), { padding: [50, 50] });
+        let d = map.distance(
+            L.latLng(s.lat, s.lng),
+            L.latLng(e.lat, e.lng)
+        );
+        let text = d < 1000 ? d.toFixed(0) + " m" : (d / 1000).toFixed(2) + " km";
+        L.popup()
+            .setLatLng([(s.lat + e.lat) / 2, (s.lng + e.lng) / 2])
+            .setContent("Khoảng cách: <b>" + text + "</b>")
+            .openOn(map);
+    }
+    setTimeout(() => {
+         let customPoints = [
+       { name: "Cổng chính 451", lat: 10.8455100997292,  lng: 106.79399727998067, type: "gate" },
+       { name: "Cổng chính 1", lat: 21.02887048429398, lng: 105.80304960921235, type: "gate" },
+       { name: "Cổng chính 2", lat: 21.02844356202903, lng: 105.80400248699763, type: "gate" },
+       { name: "Cổng chính 3", lat: 21.029148898503063, lng: 105.80255730137628, type: "gate" },
+       { name: "Sân bóng", lat: 21.026942127875277, lng: 105.8029985509306, type: "sport" },
+       { name: "Nhà thi đấu", lat: 21.02754552296029,  lng: 105.80270438235185, type: "sport" },
+       { name: "Tòa nhà H1 - Xưởng thực hành oto", lat: 21.029002655334136, lng: 105.80237523195086, type: "buldding" },
+       { name: "Tòa nhà B2 B3", lat: 21.027604357440183,  lng: 105.80236374181322, type: "buldding" },
+       { name: "Tòa nhà A10", lat: 21.027371522979614,   lng: 105.80269499462047, type: "buldding" },
+       { name: "Sân bóng bàn", lat: 21.028938389778823,  lng:  105.80252163731781, type: "sportt" },
+       { name: "Xưởng in", lat: 21.027703249385503,    lng: 105.80171598834043, type: "workshop" },
+       { name: "Xưởng thực tập cơ khí oto mở", lat: 10.847379697399925,     lng: 106.79495548028585, type: "workshop" },
+       { name: "Xưởng thực tập", lat: 10.847003895298885,     lng: 106.79521088986161, type: "workshop" },
+       { name: "Sân tennis", lat: 21.027529249588955,  lng: 105.80173074048973, type: "sport" },
+       { name: "Đài tưởng niệm", lat: 21.02770592007363, lng: 105.80327459188129, type: "parking" },
+       { name: "Công viên Thành Công", lat: 10.84608572519671,  lng: 106.79407001441581, type: "parking" },
+       { name: "Công viên Nghĩa Tình", lat: 10.847248764000321,   lng: 106.79390908187605, type: "parking" },
+       { name: "Quảng trường 27/4", lat: 10.846712686659252,   lng: 106.7938701898478, type: "parking" },
+       { name: "Căn tin", lat: 21.0277763923724, lng: 105.80371014783717, type: "food" },
+       { name: "Căn tin", lat: 10.846436105002391,  lng: 106.79502578299142, type: "food" },
+   ];
+        customPoints.forEach(p => {
+            let iconHtml = '<i class="bi bi-geo-alt-fill map-icon-style"></i>';
+       if (p.type === "gate")
+           iconHtml = '<i class="bi bi-door-open-fill map-icon-style" style="color:#6f42c1;"></i>';
+       else if (p.type === "sport")
+           iconHtml = '<i class="bi bi-dribbble map-icon-style" style="color:#20c997;"></i>';
+       else if (p.type === "parking")
+           iconHtml = '<i class="bi bi-p-square-fill map-icon-style icon-parking"></i>';
+       else if (p.type === "food")
+           iconHtml = '<i class="bi bi-cup-hot-fill map-icon-style" style="color:#fd7e14;"></i>';
+       else if (p.type === "sportt")
+   iconHtml = '<i class="bi bi-table map-icon-style" style="color:#0dcaf0;"></i>';
+ else if (p.type === "buldding")
+   iconHtml = '<i class="bi bi-building-fill map-icon-style" style="color:#0d6efd;"></i>';
+ else if (p.type === "workshop")
+   iconHtml = '<i class="bi bi-tools map-icon-style" style="color:#6610f2;"></i>';
+            let marker = L.marker([p.lat, p.lng], {
+                icon: L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-div-icon'
+                })
+            }).addTo(map);
+            marker.bindPopup(`<b>${p.name}</b>`);
+            locationLayers.push({
+                name: p.name,
+                code: p.lat > 15 ? "utc_custom" : "uth_custom",
+                lat: p.lat,
+                lng: p.lng,
+                polys: [marker]
+            });
+        });
+    }, 1000);
+    // ================= STYLE FIX =================
+    (function () {
+        var style = document.createElement('style');
+        style.innerHTML = `
+            .leaflet-routing-container { display: none !important; }
+            .btn-danger { background-color: #ff4757 !important; border: none; }
+        `;
+        document.head.appendChild(style);
+    })();
+
+
+</script>
+</body>
+</html>
