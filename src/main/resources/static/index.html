@@ -141,7 +141,6 @@
     function appendIconsToMap() {
         locationLayers.forEach(loc => {
             if (!loc.lat) return;
-            let iconHtml = '<i class="bi bi-geo-alt-fill map-icon-style"></i>';
             if (loc.code && loc.code.includes("parking"))
                 iconHtml = '<i class="bi bi-p-square-fill map-icon-style icon-parking"></i>';
             if (loc.code && loc.code.includes("axis"))
@@ -448,8 +447,9 @@ function findNearestRoad(node) {
 ];
     roadNodes.forEach(p => {
     let marker = L.circleMarker([p.lat, p.lng], {
-        radius: 4,
-        color: 'black'
+    radius: 0,
+    opacity: 0,
+    fillOpacity: 0
     }).addTo(map);
 
     locationLayers.push({
