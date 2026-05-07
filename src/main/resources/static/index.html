@@ -89,9 +89,33 @@
             <option value="21.028184,105.803834">UTC Hà Nội</option>
             <option value="10.846391,106.794475">UTH TP.HCM</option>
         </select>
-        <button onclick="setRoutingUI()" class="btn btn-success w-100 mt-3">🧭 Chỉ đường</button>
+        <div class="d-flex gap-2 mt-3 pb-2" style="overflow-x: auto; white-space: nowrap; scrollbar-width: thin;">
+            <button onclick="setRoutingUI()" class="btn btn-success btn-sm" style="flex: 0 0 auto;">
+                🧭 Chỉ đường
+            </button>
+            <button onclick="func1()" class="btn btn-primary btn-sm" style="flex: 0 0 auto;">
+                🔍 Tìm kiếm
+            </button>
+            <button onclick="func2()" class="btn btn-warning btn-sm" style="flex: 0 0 auto;">
+                ⭐ Yêu thích
+            </button>
+            <button onclick="func3()" class="btn btn-danger btn-sm" style="flex: 0 0 auto;">
+                ⚙️ Cài đặt
+            </button>
+        </div>
+
     </div>
-    <div id="chat-messages" style="flex:1; overflow:auto; padding:10px;"></div>
+    <div id="chat-messages" style="flex: 1; overflow-y: auto; padding: 10px; background-color: #f9f9f9;">
+        <div class="text-muted small text-center mt-2">Hệ thống sẵn sàng.</div>
+    </div>
+
+    <!-- KHỐI DƯỚI: Input Chat -->
+    <div class="p-2 border-top">
+        <div class="input-group">
+            <input type="text" id="chatInput" class="form-control form-control-sm" placeholder="Hỏi AI về đường đi...">
+            <button class="btn btn-primary btn-sm" onclick="sendMessage()">✈️</button>
+        </div>
+    </div>
 </div>
 <button class="toggle-btn btn btn-light" onclick="toggleSidebar()">☰</button>
 <div id="map"></div>
@@ -158,24 +182,100 @@
         document.getElementById("sidebar").classList.toggle("hide");
     }
     function setRoutingUI() {
-        let options = locationLayers
-            .filter(l => l.code)
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map(l => `<option value="${l.name}">${l.name}</option>`)
-            .join("");
-        document.getElementById("chat-messages").innerHTML = `
-            <div style="background:#f4f4f4;padding:10px;border-radius:8px;">
-                <label>Điểm đi:</label>
-                <select id="startNode" class="form-select mb-1">${options}</select>
-                <label>Điểm đến:</label>
-                <select id="endNode" class="form-select mb-1">${options}</select>
-                <button onclick="confirmRoute()" class="btn btn-danger w-100 mt-2">
-                    📍 Tìm đường
-                </button>
+
+    const chatBox = document.getElementById("chat-messages");
+
+    // ===== toggle mở / đóng =====
+    const isOpen = chatBox.dataset.routingOpen === "true";
+
+    // ===== đóng =====
+    if (isOpen) {
+
+        chatBox.innerHTML = `
+            <div class="text-muted small text-center mt-2">
+                Hệ thống sẵn sàng.
             </div>
         `;
+
+        chatBox.dataset.routingOpen = "false";
+        return;
     }
-  setTimeout(() => { let customPoints = [ { name: "Cổng chính 451", lat: 10.8455100997292, lng: 106.79399727998067, type: "gate" },
+
+    // ===== tạo options =====
+    let options = customPoints
+        .filter(p => currentCampus === "utc" ? p.lat > 20 : p.lat < 20)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(p => `<option value="${p.name}">${p.name}</option>`)
+        .join("");
+
+    // ===== render UI =====
+    chatBox.innerHTML = `
+            <div class="card-body">
+
+                <label class="small">Điểm đi</label>
+                <select id="startNode" class="form-select mb-2">
+                    ${options}
+                </select>
+
+                <label class="small">Điểm đến</label>
+                <select id="endNode" class="form-select mb-2">
+                    ${options}
+                </select>
+
+                <button onclick="confirmRoute()"
+                        class="btn btn-danger w-100 mt-2">
+                    📍 Tìm đường
+                </button>
+
+            </div>
+        </div>
+    `;
+
+    // đánh dấu đang mở
+    chatBox.dataset.routingOpen = "true";
+
+    const start = document.getElementById("startNode");
+    const end = document.getElementById("endNode");
+
+    // mặc định khác nhau
+    if (end.options.length > 1) {
+        end.selectedIndex = 1;
+    }
+
+    // ===== tránh trùng điểm =====
+    function preventDuplicate() {
+
+        if (start.value === end.value) {
+
+            for (let i = 0; i < end.options.length; i++) {
+
+                if (end.options[i].value !== start.value) {
+
+                    end.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    start.addEventListener("change", preventDuplicate);
+    end.addEventListener("change", preventDuplicate);
+}
+
+// ===== đóng UI =====
+function closeRoutingUI() {
+
+    const chatBox = document.getElementById("chat-messages");
+
+    chatBox.innerHTML = `
+        <div class="text-muted small text-center mt-2">
+            Hệ thống sẵn sàng.
+        </div>
+    `;
+
+    chatBox.dataset.routingOpen = "false";
+}
+  setTimeout(() => { window.customPoints = [ { name: "Cổng chính 451", lat: 10.8455100997292, lng: 106.79399727998067, type: "gate" },
   { name: "Cổng chính 1", lat: 21.02887048429398, lng: 105.80304960921235, type: "gate" },
   { name: "Cổng chính 2", lat: 21.02844356202903, lng: 105.80400248699763, type: "gate" },
    { name: "Cổng chính 3", lat: 21.029148898503063, lng: 105.80255730137628, type: "gate" },
@@ -589,6 +689,26 @@ let graph = buildSmartGraph(locationLayers, obstacles, 200);
     }
 
     return graph;
+}
+    function toggleRoutingTask() {
+        const panel = document.getElementById('routing-task-panel');
+        if (panel.style.display === "block") {
+            panel.style.display = "none";
+        } else {
+            panel.style.display = "block";
+        }
+    }
+    function closeRoutingUI() {
+
+    const chatBox = document.getElementById("chat-messages");
+
+    chatBox.innerHTML = `
+        <div class="text-muted small text-center mt-2">
+            Hệ thống sẵn sàng.
+        </div>
+    `;
+
+    chatBox.dataset.routingOpen = "false";
 }
 </script>
 </body>
