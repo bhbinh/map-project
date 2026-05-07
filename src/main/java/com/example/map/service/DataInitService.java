@@ -19,14 +19,6 @@ public class DataInitService {
         repo.deleteAll();
         repo.save(new Location(
                 null,
-                "utc_cafe",
-                "Quán Cafe Sinh viên",
-                21.0282,
-                105.8032,
-                "[]"
-        ));
-        repo.save(new Location(
-                null,
                 "campus_utc",
                 "Khuôn viên UTC",
                 21.027996,
