@@ -1,17 +1,26 @@
 package com.example.map.service;
 
 import com.example.map.model.Location;
+import com.example.map.model.User;
+
 import com.example.map.repository.LocationRepository;
+import com.example.map.repository.UserRepository;
+
 import jakarta.annotation.PostConstruct;
+
 import org.springframework.stereotype.Service;
 
 @Service
 public class DataInitService {
 
     private final LocationRepository repo;
+    private final UserRepository userRepo;
 
-    public DataInitService(LocationRepository repo) {
+    public DataInitService(LocationRepository repo,
+                           UserRepository userRepo) {
+
         this.repo = repo;
+        this.userRepo = userRepo;
     }
 
     @PostConstruct
@@ -150,5 +159,12 @@ public class DataInitService {
                         "[10.846993826399725, 106.79465660430022],[10.846922700654307, 106.79440715886645],[10.846814694860385, 106.79445275641886],[10.846854209179753, 106.7946834263899]" +
                         ",[10.846754106227209, 106.79471829510643],[10.846671126122637, 106.79440849997545],[10.847514020891262, 106.79418662729562],[10.847603586464869, 106.79456079545164]]"
         ));
+        userRepo.save(
+                new User(null, "admin", "123", "ADMIN")
+        );
+
+        userRepo.save(
+                new User(null, "user", "123", "USER")
+        );
     }
 }

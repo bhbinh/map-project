@@ -1,0 +1,1227 @@
+  let currentCampus = "uth";
+    let map = L.map('map').setView([10.847169006396772, 106.79407724717187], 18);
+    document.getElementById("schoolSelect").addEventListener("change", function () {
+    let c = this.value.split(",");
+    let lat = parseFloat(c[0]);
+    currentCampus = lat > 15 ? "utc" : "uth";
+    map.flyTo([lat, parseFloat(c[1])], 18);
+
+    // Nếu đang mở menu chỉ đường thì reset lại danh sách điểm cho đúng cơ sở
+    const chatBox = document.getElementById("chat-messages");
+    if (chatBox.dataset.routingOpen === "true") {
+        chatBox.dataset.routingOpen = "false"; // Reset trạng thái để setRoutingUI mở lại
+        setRoutingUI();
+    }
+});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    let locationLayers = [];
+    let routingControl = null;
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    fetch("/api/locations")
+    .then(r => r.json())
+    .then(data => {
+        data.forEach(loc => {
+            let polyData = JSON.parse(loc.polygon);
+            let drawingElements = [];
+            if (loc.code === "main_axis_utc") {
+                let line = L.polyline(polyData, {
+                    color: '#ff9f43',
+                    weight: 6
+                }).addTo(map);
+                line.bindPopup(`<b>${loc.name}</b>`);
+                drawingElements.push(line);
+            } else {
+                let p = L.polygon(polyData, {
+                    color: '#0d6efd'
+                }).addTo(map);
+                p.bindPopup(`<b>${loc.name}</b>`);
+                drawingElements.push(p);
+            }
+            locationLayers.push({
+                name: loc.name,
+                code: loc.code,
+                lat: loc.lat,
+                lng: loc.lng,
+                polys: drawingElements
+            });
+        });
+        appendIconsToMap();
+    });
+    function appendIconsToMap() {
+        locationLayers.forEach(loc => {
+            if (!loc.lat) return;
+            if (loc.code && loc.code.includes("parking"))
+                iconHtml = '<i class="bi bi-p-square-fill map-icon-style icon-parking"></i>';
+            if (loc.code && loc.code.includes("axis"))
+                iconHtml = '<i class="bi bi-signpost map-icon-style icon-road"></i>';
+            let icon = L.divIcon({
+                html: iconHtml,
+                className: 'custom-div-icon'
+            });
+         let marker = L.marker([loc.lat, loc.lng], { icon }).addTo(map);
+
+marker.on('click', function(e) {
+
+    // Nếu đang ở chế độ lưu yêu thích
+    if (isSaveMode) {
+
+        L.DomEvent.stopPropagation(e);
+
+        handleMarkerClick(loc);
+
+        return;
+    }
+
+    marker.openPopup();
+});
+
+marker.bindTooltip(loc.name, {
+    permanent: false,
+    direction: 'top',
+    offset: [0, -10],
+    className: 'room-label'
+});
+            loc.polys.push(marker);
+        });
+    }
+    function toggleSidebar() {
+        document.getElementById("sidebar").classList.toggle("hide");
+    }
+   function setRoutingUI() {
+    const chatBox = document.getElementById("chat-messages");
+
+    // Nếu đang mở thì đóng lại (về trạng thái sẵn sàng)
+    if (chatBox.dataset.routingOpen === "true") {
+        chatBox.innerHTML = `<div class="text-muted small text-center mt-2">Hệ thống sẵn sàng.</div>`;
+        chatBox.dataset.routingOpen = "false";
+        return;
+    }
+
+    // Lọc danh sách điểm theo Campus hiện tại (UTC hoặc UTH)
+    let options = customPoints
+        .filter(p => currentCampus === "utc" ? p.lat > 20 : p.lat < 20)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(p => `<option value="${p.name}">${p.name}</option>`)
+        .join("");
+
+    // Chèn giao diện chọn đường vào khung chat
+    chatBox.innerHTML = `
+        <div class="routing-container animate-fade-in">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-3">
+                    <h6 class="card-title d-flex align-items-center mb-3">
+                        <i class="bi bi-geo-fill text-danger me-2"></i> Chỉ đường nội bộ
+                    </h6>
+
+                    <div class="mb-2">
+                        <label class="small fw-bold text-muted">Điểm bắt đầu</label>
+                        <select id="startNode" class="form-select form-select-sm">
+                            ${options}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="small fw-bold text-muted">Điểm đến</label>
+                        <select id="endNode" class="form-select form-select-sm">
+                            ${options}
+                        </select>
+                    </div>
+
+                    <button onclick="confirmRoute()" class="btn btn-primary btn-sm w-100 rounded-pill">
+                        📍 Bắt đầu tìm đường
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    chatBox.dataset.routingOpen = "true";
+const start = document.getElementById("startNode");
+const end = document.getElementById("endNode");
+
+// mặc định chọn khác nhau
+if (end.options.length > 1) {
+    end.selectedIndex = 1;
+}
+
+function updateEndOptions() {
+
+    const currentStart = start.value;
+    const currentEnd = end.value;
+
+    end.innerHTML = options;
+
+    // disable option trùng
+    Array.from(end.options).forEach(opt => {
+
+        if (opt.value === currentStart) {
+            opt.disabled = true;
+        }
+
+    });
+
+    // nếu end đang trùng thì chọn cái khác
+    if (currentEnd === currentStart) {
+
+        const firstValid =
+            Array.from(end.options)
+                .find(o => !o.disabled);
+
+        if (firstValid) {
+            end.value = firstValid.value;
+        }
+
+    } else {
+
+        end.value = currentEnd;
+
+    }
+
+}
+
+updateEndOptions();
+
+start.addEventListener("change", updateEndOptions);
+}
+  setTimeout(() => { window.customPoints = [ { name: "Cổng chính 451", lat: 10.8455100997292, lng: 106.79399727998067, type: "gate" },
+  { name: "Cổng chính 1", lat: 21.02887048429398, lng: 105.80304960921235, type: "gate" },
+  { name: "Cổng chính 2", lat: 21.02844356202903, lng: 105.80400248699763, type: "gate" },
+   { name: "Cổng chính 3", lat: 21.029148898503063, lng: 105.80255730137628, type: "gate" },
+    { name: "Nhà xe 2", lat: 21.028493675877233, lng: 105.80344221262649, type: "sportt" },
+    { name: "Nhà xe 1", lat: 21.02885419089029, lng: 105.80271533399292, type: "sportt" },
+    { name: "Phòng bảo vệ", lat: 21.02878409081862, lng: 105.80306938557636, type: "sportt" },
+    { name: "Sân bóng", lat: 21.026942127875277, lng: 105.8029985509306, type: "sport" },
+    { name: "Nhà thi đấu", lat: 21.02754552296029, lng: 105.80270438235185, type: "sport" },
+    { name: "Tòa nhà H1 - Xưởng thực hành oto", lat: 21.029002655334136, lng: 105.80237523195086, type: "buldding" },
+     { name: "Tòa nhà B2 B3", lat: 21.027604357440183, lng: 105.80236374181322, type: "buldding" },
+     { name: "Tòa nhà E9", lat: 10.847579815478605, lng: 106.79471122726642, type: "buldding" },
+     { name: "Tòa nhà A8", lat: 21.028752982123674, lng: 105.80232130797195, type: "buldding" },
+     { name: "Tòa nhà A1", lat: 21.028537674509526, lng: 105.8026431730265, type: "buldding" },
+     { name: "Tòa nhà A6", lat: 21.027571289991773, lng: 105.80194311653287, type: "buldding" },
+     { name: "Tòa nhà A2", lat: 21.028126489423713, lng: 105.8035072483792, type: "buldding" },
+     { name: "Tòa nhà A5", lat: 21.027675843323305, lng: 105.80381838462542, type: "buldding" },
+      { name: "Tòa nhà A4", lat: 21.02727026067406, lng: 105.80327657845028, type: "buldding" },
+       { name: "Tòa nhà A3B", lat: 21.027058418267288, lng: 105.80339628765809, type: "buldding" },
+        { name: "Tòa nhà A3", lat: 21.026745467497044, lng: 105.80325681278939, type: "buldding" },
+        { name: "Tòa nhà A7", lat: 21.026532660595297, lng: 105.8028598458625, type: "buldding" },
+        { name: "Tòa nhà hội trường", lat: 21.027814600604533, lng: 105.80279265002868, type: "buldding" },
+         { name: "Tòa nhà 15 tầng", lat: 21.028300296440595, lng: 105.8028999383873, type: "buldding" },
+         { name: "Tòa nhà T1 T2", lat: 21.028275260611444, lng: 105.8024493272811, type: "buldding" },
+         { name: "Tòa nhà A9", lat: 21.02797483033365, lng: 105.80226157265353, type: "buldding" },
+         { name: "Tòa nhà A10", lat: 21.027371522979614, lng: 105.80269499462047, type: "buldding" },
+         { name: "Tòa nhà E6", lat: 10.847483664192342, lng: 106.79435315239327, type: "buldding" },
+         { name: "Tòa nhà E3", lat: 10.846802701451132, lng: 106.79464014873555, type: "buldding" },
+         { name: "Tòa nhà E4", lat: 10.846998955864095, lng: 106.79445641743332, type: "buldding" },
+         { name: "Tòa nhà E5", lat: 10.847262384402411, lng: 106.79446312295354, type: "buldding" },
+         { name: "Tòa nhà E1", lat: 10.847056910158036, lng: 106.79433303582935, type: "buldding" },
+         { name: "Tòa nhà E7", lat: 10.846933098690446, lng: 106.79406213271554, type: "buldding" },
+         { name: "Tòa nhà E10", lat: 10.847363804319334, lng: 106.79379391183676, type: "buldding" },
+         { name: "Giảng đường đa năng", lat: 10.846549637832053, lng: 106.79446367352779, type: "buldding" },
+          { name: "Tòa nhà C2", lat: 10.84602127424319, lng: 106.79446256798812, type: "buldding" },
+           { name: "Tòa nhà C1", lat: 10.845955416857908, lng: 106.79483941832281, type: "buldding" },
+           { name: "Tòa nhà C3", lat: 10.846270215033455, lng: 106.79502314964631, type: "buldding" },
+           { name: "Tòa nhà E8", lat: 10.847110264963648, lng: 106.79503788043642, type: "buldding" },
+           { name: "Tòa nhà E8B", lat: 10.84680337054212, lng: 106.7952618448702, type: "buldding" },
+           { name: "Sân bóng bàn", lat: 21.028938389778823, lng: 105.80252163731781, type: "sport" },
+           { name: "Xưởng in", lat: 21.027703249385503, lng: 105.80171598834043, type: "workshop" },
+           { name: "Xưởng thực tập cơ khí oto mở", lat: 10.847379697399925, lng: 106.79495548028585, type: "workshop" },
+            { name: "Xưởng thực tập", lat: 10.847003895298885, lng: 106.79521088986161, type: "workshop" },
+             { name: "Sân tennis", lat: 21.027529249588955, lng: 105.80173074048973, type: "sport" },
+              { name: "Đài tưởng niệm", lat: 21.02770592007363, lng: 105.80327459188129, type: "parking" },
+               { name: "Công viên Thành Công", lat: 10.84608572519671, lng: 106.79407001441581, type: "parking" },
+                { name: "Công viên Nghĩa Tình", lat: 10.847248764000321, lng: 106.79390908187605, type: "parking" },
+                { name: "Quảng trường 27/4", lat: 10.846712686659252, lng: 106.7938701898478, type: "parking" },
+                 { name: "Căn tin utc", lat: 21.0277763923724, lng: 105.80371014783717, type: "food" },
+                 { name: "Căn tin uc", lat: 21.027565750167746, lng: 105.80288713806848, type: "food" },
+                 { name: "Căn tin uth", lat: 10.846436105002391, lng: 106.79502578299142, type: "food" }, ];
+        customPoints.forEach(p => {
+       let iconHtml = '<i class="bi bi-geo-alt-fill map-icon-style"></i>';
+       if (p.type === "gate")
+           iconHtml = '<i class="bi bi-door-open-fill map-icon-style" style="color:#6f42c1;"></i>';
+       else if (p.type === "sport")
+           iconHtml = '<i class="bi bi-dribbble map-icon-style" style="color:#20c997;"></i>';
+       else if (p.type === "parking")
+           iconHtml = '<i class="bi bi-p-square-fill map-icon-style icon-parking"></i>';
+       else if (p.type === "food")
+           iconHtml = '<i class="bi bi-cup-hot-fill map-icon-style" style="color:#fd7e14;"></i>';
+       else if (p.type === "sportt")
+   iconHtml = '<i class="bi bi-table map-icon-style" style="color:#0dcaf0;"></i>';
+ else if (p.type === "buldding")
+   iconHtml = '<i class="bi bi-building-fill map-icon-style" style="color:#0d6efd;"></i>';
+ else if (p.type === "workshop")
+   iconHtml = '<i class="bi bi-tools map-icon-style" style="color:#6610f2;"></i>';
+           let marker = L.marker([p.lat, p.lng], {
+    icon: L.divIcon({
+        html: iconHtml,
+        className: 'custom-div-icon'
+    })
+}).addTo(map);
+
+marker.on('click', function(e) {
+
+    if (isSaveMode) {
+
+        L.DomEvent.stopPropagation(e);
+
+        handleMarkerClick(p);
+
+        return;
+    }
+
+    marker.openPopup();
+});
+
+marker.bindTooltip(p.name, {
+    permanent: false,
+    direction: 'top',
+    offset: [0, -10],
+    className: 'room-label'
+});
+            locationLayers.push({
+                name: p.name,
+                code: p.lat > 15 ? "utc_custom" : "uth_custom",
+                lat: p.lat,
+                lng: p.lng,
+                polys: [marker]
+            });
+        });
+    }, 1000);
+    (function () {
+        var style = document.createElement('style');
+        style.innerHTML = `
+            .leaflet-routing-container { display: none !important; }
+            .btn-danger { background-color: #ff4757 !important; border: none; }
+        `;
+        document.head.appendChild(style);
+    })();
+    let roadNodes = [
+    // ===== UTC =====
+     { name: "r1", lat: 21.0288, lng: 105.8030, type: "road_main" },
+    { name: "r2", lat: 21.0285, lng: 105.8027, type: "road_main" },
+    { name: "r3", lat: 21.0282, lng: 105.8025, type: "road_main" },
+    { name: "r4", lat: 21.0279, lng: 105.8023, type: "road_main" },
+    { name: "r5", lat: 21.027582429601996,   lng: 105.80208331075818, type: "road_main" },
+    { name: "r6", lat: 21.027361658914714,  lng: 105.80248566172455, type: "road_main" },
+    { name: "r7", lat: 21.027187487001353,   lng: 105.80277934398607, type: "road_main" },
+    { name: "r8", lat: 21.027445529437767,  lng: 105.80291481516778, type: "road_main" },
+    { name: "r9", lat: 21.027582429601996,    lng: 105.80298721517953, type: "road_main" },
+    { name: "r10", lat: 21.02751232893215,    lng: 105.8033144446733, type: "road_main" },
+    { name: "r11", lat: 21.02790038579774,   lng: 105.80353170359952, type: "road_main" },
+    { name: "r12", lat: 21.027900385804113,  lng: 105.80313205446708, type: "road_main" },
+    { name: "r13", lat: 21.02803057239721,   lng: 105.80290943112296, type: "road_main" },
+    { name: "r14", lat: 21.028063119027706,    lng: 105.80329835142294, type: "road_main" },
+    { name: "r15", lat: 21.028168269633518,     lng: 105.8031052323781, type: "road_main" },
+    { name: "r16", lat: 21.028403606430405,    lng: 105.80321788515465, type: "road_main" },
+    { name: "r17", lat: 21.028128212277135,     lng: 105.80378383124841, type: "road_main" },
+    { name: "r18", lat: 21.028633935712854,     lng: 105.80291479554434, type: "road_main" },
+    { name: "r19", lat: 21.028989443237037,     lng: 105.80227642981058, type: "road_main" },
+    { name: "r20", lat: 21.027560933394746,     lng: 105.8016539079966, type: "road_main" },
+    { name: "r21", lat: 21.02734562405857,      lng: 105.80192481110211, type: "road_main" },
+    { name: "r22", lat: 21.026794831312085,   lng: 105.80265705415556, type: "road_main" },
+    { name: "r23", lat: 21.026657131137657,  lng: 105.80299231170274, type: "road_main" },
+    { name: "r24", lat: 21.02706021185179,   lng: 105.80328467247999, type: "road_main" },
+
+
+    // ===== UTH =====
+    { name: "ro1", lat: 10.845773782316789,  lng: 106.7939195483143, type: "road_main" },
+    { name: "ro2", lat: 10.84586729985695, lng:  106.79425616554228, type: "road_main" },
+    { name: "ro3", lat: 10.84619334281088,  lng: 106.79388719248603, type: "road_main" },
+    { name: "ro4", lat: 10.845939133364586,  lng: 106.79468917297112, type: "road_main" },
+    { name: "ro5", lat: 10.846529215064225,  lng: 106.7949185018501, type: "road_main" },
+    { name: "ro8", lat: 10.846849407602926,  lng: 106.79481163732868, type: "road_main" },
+    { name: "ro9", lat: 10.846358112506678,   lng: 106.79443210474857, type: "road_main" },
+    { name: "ro10", lat: 10.846522755730733,  lng:  106.79375887029649, type: "road_main" },
+    { name: "ro11", lat: 10.84660776560122,   lng:  106.79411983806152, type: "road_main" },
+    { name: "ro12", lat: 10.847050325989834,   lng:  106.79363301713398, type: "road_main" },
+    { name: "ro13", lat: 10.847180723125767,   lng: 106.7940541239417, type: "road_main" },
+    { name: "ro14", lat: 10.847242211908423,   lng: 106.7946997434851, type: "road_main" },
+    { name: "ro15", lat: 10.847449003165593,   lng: 106.79465682814148, type: "road_main" },
+    { name: "ro16", lat: 10.845954833526063,   lng: 106.79494458328483, type: "road_main" },
+];
+   roadNodes.forEach(p => {
+
+    let iconHtml = '<i class="bi bi-geo-alt-fill map-icon-style" style="color:#dc3545;"></i>';
+
+    // icon theo loại road
+    if (p.type === "road_main")
+        iconHtml = '<i class="bi bi-signpost-fill map-icon-style" style="color:#fd7e14;"></i>';
+
+    let marker = L.marker([p.lat, p.lng], {
+        icon: L.divIcon({
+            html: iconHtml,
+            className: 'custom-div-icon',
+            iconSize: [24,24],
+            iconAnchor: [12,24]
+        })
+    }).addTo(map);
+
+marker.bindTooltip(p.name, {
+    permanent: false,
+    direction: 'top',
+    offset: [0, -10],
+    className: 'room-label'
+});
+
+    locationLayers.push({
+        name: p.name,
+        code: "road",
+        type: p.type,
+        lat: p.lat,
+        lng: p.lng,
+        polys: [marker]
+    });
+
+});
+const locationToRoad = {
+
+    // ===== UTC =====
+    "Cổng chính 1": "r1",
+    "Cổng chính 2": "r1",
+    "Cổng chính 3": "r1",
+
+    "Tòa nhà A1": "r2",
+    "Tòa nhà A2": "r16",
+    "Tòa nhà A3": "r23",
+    "Tòa nhà A4": "r24",
+    "Tòa nhà A5": "r11",
+    "Tòa nhà A6": "r21",
+    "Tòa nhà A7": "r22",
+    "Tòa nhà A8": "r18",
+    "Tòa nhà A9": "r4",
+    "Tòa nhà A10": "r7",
+
+    "Tòa nhà B2 B3": "r5",
+    "Tòa nhà H1 - Xưởng thực hành oto": "r19",
+    "Tòa nhà hội trường": "r8",
+    "Tòa nhà 15 tầng": "r15",
+    "Tòa nhà T1 T2": "r3",
+
+    "Căn tin utc": "r17",
+    "Căn tin mixue": "r11",
+
+    "Nhà thi đấu": "r8",
+    "Xưởng in": "r20",
+    "Sân tennis": "r20",
+    "Sân bóng": "r22",
+    "Đài tưởng niệm": "r24",
+
+    "Nhà xe 1": "r1",
+    "Nhà xe 2": "r16",
+    "Phòng bảo vệ": "r1",
+    "Sân bóng bàn": "r19",
+
+    // ===== UTH =====
+    "Cổng chính 451": "ro1",
+
+    "Tòa nhà E1": "ro11",
+    "Tòa nhà E3": "ro14",
+    "Tòa nhà E4": "ro9",
+    "Tòa nhà E5": "ro14",
+    "Tòa nhà E6": "ro15",
+    "Tòa nhà E7": "ro13",
+    "Tòa nhà E8": "ro15",
+    "Tòa nhà E8B": "ro15",
+    "Tòa nhà E9": "ro14",
+    "Tòa nhà E10": "ro12",
+
+    "Tòa nhà C1": "ro4",
+    "Tòa nhà C2": "ro2",
+    "Tòa nhà C3": "ro4",
+
+    "Giảng đường đa năng": "ro9",
+
+    "Căn tin uth": "ro5",
+
+    "Công viên Thành Công": "ro3",
+    "Công viên Nghĩa Tình": "ro12",
+    "Quảng trường 27/4": "ro10",
+
+    "Xưởng thực tập": "ro15",
+    "Xưởng thực tập cơ khí oto mở": "ro15"
+};
+const roadLinks = [
+
+    // UTC
+    ["r1", "r2"],
+    ["r1", "r18"],
+    ["r19", "r18"],
+    ["r2", "r3"],
+    ["r3", "r4"],
+    ["r3", "r13"],
+    ["r4", "r5"],
+    ["r5", "r6"],
+    ["r5", "r21"],
+    ["r6", "r7"],
+    ["r7", "r8"],
+    ["r8", "r9"],
+    ["r9", "r10"],
+    ["r10", "r11"],
+    ["r11", "r14"],
+    ["r12", "r13"],
+    ["r12", "r14"],
+    ["r12", "r15"],
+    ["r13", "r14"],
+    ["r14", "r15"],
+    ["r15", "r16"],
+    ["r16", "r17"],
+    ["r16", "r18"],
+    ["r20", "r21"],
+    ["r22", "r23"],
+    ["r23", "r24"],
+    ["r7", "r24"],
+    ["r7", "r22"],
+    ["r8", "r10"],
+    ["r9", "r12"],
+    ["r13", "r15"],
+    // UTH
+    ["ro1", "ro2"],
+    ["ro2", "ro3"],
+    ["ro2", "ro4"],
+    ["ro1", "ro3"],
+    ["ro5", "ro8"],
+    ["ro5", "ro16"],
+    ["ro5", "ro9"],
+    ["ro3", "ro9"],
+    ["ro9", "ro10"],
+    ["ro10", "ro11"],
+    ["ro10", "ro12"],
+    ["ro10", "ro3"],
+    ["ro11", "ro12"],
+    ["ro12", "ro13"],
+    ["ro14", "ro15"],
+    ["ro14", "ro8"],
+
+
+];
+function drawRoadNetwork() {
+
+    roadLinks.forEach(link => {
+
+        let a = roadNodes.find(r => r.name === link[0]);
+        let b = roadNodes.find(r => r.name === link[1]);
+
+        if (!a || !b) return;
+
+        L.polyline([
+            [a.lat, a.lng],
+            [b.lat, b.lng]
+        ], {
+            color: "#6c757d",
+            weight: 5,
+            opacity: 0.9
+        }).addTo(map);
+
+    });
+
+}
+const graph = {};
+
+roadLinks.forEach(([aName, bName]) => {
+
+    const a =
+        roadNodes.find(r => r.name === aName);
+
+    const b =
+        roadNodes.find(r => r.name === bName);
+
+    if (!a || !b) return;
+
+    const dist =
+        distance(a, b);
+
+    if (!graph[aName]) graph[aName] = [];
+    if (!graph[bName]) graph[bName] = [];
+
+    graph[aName].push({
+        node: bName,
+        weight: dist
+    });
+
+    graph[bName].push({
+        node: aName,
+        weight: dist
+    });
+
+});
+function findPath(start, end) {
+
+    const distances = {};
+    const previous = {};
+    const visited = new Set();
+
+    Object.keys(graph).forEach(node => {
+        distances[node] = Infinity;
+    });
+
+    distances[start] = 0;
+
+    while (true) {
+
+        let closestNode = null;
+        let shortestDistance = Infinity;
+
+        for (const node in distances) {
+
+            if (
+                !visited.has(node) &&
+                distances[node] < shortestDistance
+            ) {
+                shortestDistance = distances[node];
+                closestNode = node;
+            }
+        }
+
+        if (closestNode === null) break;
+
+        if (closestNode === end) break;
+
+        visited.add(closestNode);
+
+        const neighbors =
+            graph[closestNode];
+
+        neighbors.forEach(neighbor => {
+
+            const newDistance =
+                distances[closestNode] +
+                neighbor.weight;
+
+            if (
+                newDistance <
+                distances[neighbor.node]
+            ) {
+
+                distances[neighbor.node] =
+                    newDistance;
+
+                previous[neighbor.node] =
+                    closestNode;
+            }
+
+        });
+    }
+
+    // build path
+    const path = [];
+
+    let current = end;
+
+    while (current) {
+
+        path.unshift(current);
+
+        current = previous[current];
+    }
+
+    return path;
+}
+function nodesToLatLng(path) {
+
+    return path.map(nodeName => {
+
+        const node =
+            roadNodes.find(r => r.name === nodeName);
+
+        return [node.lat, node.lng];
+
+    });
+
+}
+drawRoadNetwork();
+    function toggleRoutingTask() {
+        const panel = document.getElementById('routing-task-panel');
+        if (panel.style.display === "block") {
+            panel.style.display = "none";
+        } else {
+            panel.style.display = "block";
+        }
+    }
+    function closeRoutingUI() {
+
+    const chatBox = document.getElementById("chat-messages");
+
+    chatBox.innerHTML = `
+        <div class="text-muted small text-center mt-2">
+            Hệ thống sẵn sàng.
+        </div>
+    `;
+
+    chatBox.dataset.routingOpen = "false";
+}
+function confirmRoute() {
+
+    const startName =
+        document.getElementById("startNode").value;
+
+    const endName =
+        document.getElementById("endNode").value;
+
+    // ===== mapping sang road node =====
+    const startRoad =
+        locationToRoad[startName];
+
+    const endRoad =
+        locationToRoad[endName];
+
+    if (!startRoad || !endRoad) {
+
+        alert("Chưa có dữ liệu node đường!");
+
+        return;
+    }
+
+    // ===== tìm path =====
+    const nodePath =
+        findPath(startRoad, endRoad);
+
+    if (!nodePath || nodePath.length === 0) {
+
+        alert("Không tìm thấy đường!");
+
+        return;
+    }
+
+    // ===== tính khoảng cách =====
+    let totalDistance = 0;
+
+    for (let i = 0; i < nodePath.length - 1; i++) {
+
+        const a =
+            roadNodes.find(r => r.name === nodePath[i]);
+
+        const b =
+            roadNodes.find(r => r.name === nodePath[i + 1]);
+
+        totalDistance += distance(a, b);
+    }
+
+    console.log(
+        "Khoảng cách:",
+        Math.round(totalDistance),
+        "m"
+    );
+
+    // ===== convert sang latlng =====
+    let latlngs =
+        nodesToLatLng(nodePath);
+
+    // ===== thêm điểm đầu =====
+    const startPoint =
+        customPoints.find(p => p.name === startName);
+
+    latlngs.unshift([
+        startPoint.lat,
+        startPoint.lng
+    ]);
+
+    // ===== thêm điểm cuối =====
+    const endPoint =
+        customPoints.find(p => p.name === endName);
+
+    latlngs.push([
+        endPoint.lat,
+        endPoint.lng
+    ]);
+
+    // ===== xóa route cũ =====
+    if (window.currentRoute) {
+
+        map.removeLayer(window.currentRoute);
+
+    }
+
+    // ===== vẽ =====
+    window.currentRoute = L.polyline(latlngs, {
+
+        color: "#ff4757",
+        weight: 7,
+        smoothFactor: 1.5
+
+    }).addTo(map);
+
+    // ===== fit =====
+    map.fitBounds(
+        window.currentRoute.getBounds(),
+        {
+            padding: [40, 40]
+        }
+    );
+
+    // ===== hiển thị khoảng cách =====
+    document.getElementById("chat-messages").innerHTML += `
+        <div class="alert alert-success mt-2 small">
+            📏 Quãng đường:
+            <b>${Math.round(totalDistance)}m</b>
+        </div>
+    `;
+}
+    function openRoutingChat() {
+
+    // tránh mở nhiều lần
+    if (document.getElementById("routing-chat-ui")) {
+        return;
+    }
+
+    setRoutingUI();
+}
+    function func1() {
+    const chatBox = document.getElementById("chat-messages");
+
+    // Lọc danh sách điểm theo Campus hiện tại
+    let options = customPoints
+        .filter(p => currentCampus === "utc" ? p.lat > 20 : p.lat < 20)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(p => `<option value="${p.name}">${p.name}</option>`)
+        .join("");
+
+    chatBox.innerHTML = `
+        <div class="search-container animate-fade-in">
+            <div class="card border-0 shadow-sm" style="background: #e7f1ff;">
+                <div class="card-body p-3">
+                    <h6 class="card-title d-flex align-items-center mb-3">
+                        <i class="bi bi-search text-primary me-2"></i> Tìm vị trí
+                    </h6>
+                    <div class="mb-3">
+                        <label class="small fw-bold text-muted">Chọn địa điểm</label>
+                        <select id="searchNode" class="form-select form-select-sm shadow-none">
+                            ${options}
+                        </select>
+                    </div>
+                    <button onclick="highlightLocation()" class="btn btn-primary btn-sm w-100 rounded-pill">
+                        🔍 Xem trên bản đồ
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    chatBox.dataset.routingOpen = "false"; // Đóng trạng thái chỉ đường nếu đang mở
+}
+    function highlightLocation() {
+    const targetName = document.getElementById("searchNode").value;
+    let targetLayer = null;
+
+    // 1. Reset tất cả các icon về trạng thái cũ
+    locationLayers.forEach(loc => {
+        loc.polys.forEach(item => {
+            if (item instanceof L.Marker) {
+                const iconElement = item.getElement();
+                if (iconElement) {
+                    iconElement.style.scale = "1";
+                    iconElement.style.color = "";
+                    iconElement.style.filter = "drop-shadow(0 0 2px rgba(0,0,0,0.5))";
+                    iconElement.style.fontWeight = "normal";
+                    iconElement.style.zIndex = "";
+                }
+            }
+        });
+        if (loc.name === targetName) targetLayer = loc;
+    });
+
+    // 2. Chỉ tô đậm và tăng size icon mục tiêu (KHÔNG zoom bản đồ)
+    if (targetLayer) {
+        // Di chuyển tâm bản đồ đến điểm đó nhưng GIỮ NGUYÊN mức zoom hiện tại
+        map.panTo([targetLayer.lat, targetLayer.lng]);
+
+        targetLayer.polys.forEach(item => {
+            if (item instanceof L.Marker) {
+                const iconElement = item.getElement();
+                if (iconElement) {
+                    // Tăng kích cỡ icon
+                    iconElement.style.scale = "1";
+                    // Tô đậm bằng màu sắc và hào quang (Glow)
+                    iconElement.style.color = "#e67e22"; // Màu cam đậm rực rỡ
+                    iconElement.style.filter = "drop-shadow(0 0 12px rgba(230, 126, 34, 0.9)) brightness(1.2)";
+                    iconElement.style.fontWeight = "bold";
+                    iconElement.style.zIndex = "1000";
+                    iconElement.style.transition = "all 0.3s ease-in-out";
+                }
+                item.openPopup();
+            }
+        });
+    }
+}
+    let favorites = JSON.parse(localStorage.getItem('mapFavorites')) || [];
+    function func2() {
+    const chatBox = document.getElementById("chat-messages");
+
+    let favListHtml = favorites.length === 0
+        ? '<div class="text-muted small text-center my-3">Chưa có địa điểm yêu thích nào.</div>'
+        : favorites.map((fav, index) => `
+            <div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-white rounded shadow-sm border-start border-warning border-4">
+                <span class="small fw-bold text-truncate" style="max-width: 180px;">⭐ ${fav.name}</span>
+                <button onclick="removeFavorite(${index})" class="btn btn-outline-danger btn-sm border-0">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>
+        `).join("");
+
+    chatBox.innerHTML = `
+        <div class="fav-container animate-fade-in">
+            <h6 class="mb-3 d-flex align-items-center">
+                <i class="bi bi-star-fill text-warning me-2"></i> Danh sách yêu thích
+            </h6>
+
+            <div id="favorites-list" style="max-height: 250px; overflow-y: auto;">
+                ${favListHtml}
+            </div>
+
+            <hr>
+
+            <div class="alert alert-warning py-2 px-3 small mb-0">
+                <i class="bi bi-info-circle me-1"></i>
+                Hãy nhấn vào các <b>Icon</b> trên bản đồ để thêm vào danh sách yêu thích.
+            </div>
+
+            <button onclick="closeFavMode()" class="btn btn-secondary btn-sm w-100 mt-2 rounded-pill">
+                Xong
+            </button>
+        </div>
+    `;
+
+    // Kích hoạt chế độ lưu khi nhấn vào icon
+    enableSaveMode(true);
+}
+    // Biến trạng thái
+let isSaveMode = false;
+
+function enableSaveMode(status) {
+    isSaveMode = status;
+    // Có thể thêm hiệu ứng visual để người dùng biết đang ở chế độ chọn
+    document.getElementById("map").style.cursor = status ? "copy" : "";
+}
+
+// Hàm này bạn cần gọi bên trong vòng lặp fetch dữ liệu / tạo marker
+// Ví dụ: marker.on('click', (e) => handleMarkerClick(e, loc));
+
+function handleMarkerClick(loc) {
+    if (!isSaveMode) return; // Nếu không ở chế độ yêu thích thì thôi
+
+    // Kiểm tra xem đã tồn tại chưa
+    if (!favorites.some(f => f.name === loc.name)) {
+        favorites.push({
+            name: loc.name,
+            lat: loc.lat,
+            lng: loc.lng
+        });
+        localStorage.setItem('mapFavorites', JSON.stringify(favorites));
+        func2(); // Vẽ lại danh sách trong chat
+    }
+}
+
+function removeFavorite(index) {
+    favorites.splice(index, 1);
+    localStorage.setItem('mapFavorites', JSON.stringify(favorites));
+    func2(); // Cập nhật lại giao diện
+}
+
+function closeFavMode() {
+    enableSaveMode(false);
+    document.getElementById("chat-messages").innerHTML = `
+        <div class="text-muted small text-center mt-2">Hệ thống sẵn sàng.</div>
+    `;
+}
+function distance(a, b) {
+
+    const R = 6371000;
+
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLng = (b.lng - a.lng) * Math.PI / 180;
+
+    const lat1 = a.lat * Math.PI / 180;
+    const lat2 = b.lat * Math.PI / 180;
+
+    const x =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.sin(dLng / 2) * Math.sin(dLng / 2) *
+        Math.cos(lat1) * Math.cos(lat2);
+
+    const y = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+
+    return R * y;
+}
+    document.getElementById("chat-messages").innerHTML += `
+    <div class="alert alert-success mt-2 small">
+        📏 Quãng đường:
+        <b>${Math.round(totalDistance)}m</b>
+    </div>
+`;
+    // --- TÍNH NĂNG BỘ LỌC (FILTER) ---
+function openFilterUI() {
+    const chatBox = document.getElementById("chat-messages");
+    chatBox.innerHTML = `
+        <div class="filter-container animate-fade-in">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-3">
+                    <h6 class="card-title mb-3"><i class="bi bi-filter-circle-fill text-info"></i> Lọc địa điểm</h6>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-primary btn-sm text-start" onclick="applyFilter('buldding')">🏢 Tòa nhà / Giảng đường</button>
+                        <button class="btn btn-outline-success btn-sm text-start" onclick="applyFilter('parking')">🌳 Công viên / Khuôn viên</button>
+                        <button class="btn btn-outline-warning btn-sm text-start" onclick="applyFilter('food')">🍴 Nhà ăn / Canteen</button>
+                        <button class="btn btn-outline-info btn-sm text-start" onclick="applyFilter('sport')">⚽ Khu thể thao</button>
+                        <button class="btn btn-dark btn-sm mt-2" onclick="applyFilter('all')">Hiển thị tất cả</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    chatBox.dataset.routingOpen = "false";
+}
+
+function applyFilter(type) {
+    locationLayers.forEach(loc => {
+        // Tìm thông tin gốc trong customPoints dựa trên tên
+        const pointInfo = customPoints.find(p => p.name === loc.name);
+        const shouldShow = (type === 'all' || (pointInfo && pointInfo.type === type));
+
+        loc.polys.forEach(item => {
+            if (shouldShow) {
+                if (!map.hasLayer(item)) item.addTo(map);
+            } else {
+                if (map.hasLayer(item)) map.removeLayer(item);
+            }
+        });
+    });
+}
+
+// --- TÍNH NĂNG GÓP Ý (FEEDBACK) ---
+function openFeedbackUI() {
+    const chatBox = document.getElementById("chat-messages");
+    chatBox.innerHTML = `
+        <div class="feedback-container animate-fade-in">
+            <div class="card border-0 shadow-sm" style="background: #fff3cd;">
+                <div class="card-body p-3">
+                    <h6 class="card-title"><i class="bi bi-megaphone-fill text-warning"></i> Gửi góp ý</h6>
+                    <p class="small text-muted">Bạn thấy thông tin chưa chính xác? Hãy cho chúng tôi biết.</p>
+                    <textarea id="feedbackText" class="form-control form-control-sm mb-2" rows="3" placeholder="Nhập nội dung góp ý..."></textarea>
+                    <button onclick="sendFeedback()" class="btn btn-warning btn-sm w-100">Gửi phản hồi</button>
+                </div>
+            </div>
+        </div>
+    `;
+    chatBox.dataset.routingOpen = "false";
+}
+
+function sendFeedback() {
+    const content = document.getElementById("feedbackText").value;
+    if (!content.trim()) return alert("Vui lòng nhập nội dung!");
+
+    alert("Cảm ơn bạn! Góp ý đã được gửi hệ thống.");
+    document.getElementById("chat-messages").innerHTML = `<div class="text-muted small text-center mt-2">Cảm ơn bạn đã đóng góp!</div>`;
+}
+    async function loadAdminUI() {
+
+    const res =
+        await fetch("/api/admin/stats");
+
+    const data =
+        await res.json();
+
+    document.getElementById("chat-messages").innerHTML += `
+
+        <div class="alert alert-dark mt-3">
+
+            <h6>ADMIN PANEL</h6>
+
+            👤 User:
+            ${data.users}
+            <br>
+
+            ⭐ Favorite:
+            ${data.favorites}
+            <br>
+
+            💬 Feedback:
+            ${data.feedbacks}
+
+        </div>
+    `;
+}
+function openLoginUI() {
+
+    const chatBox =
+        document.getElementById("chat-messages");
+
+    chatBox.innerHTML = `
+
+        <div id="loginBox"
+             class="login-container animate-fade-in">
+
+            <div class="card border-0 shadow-sm">
+
+                <div class="card-body p-3">
+
+                    <h6 class="card-title mb-3">
+                        <i class="bi bi-shield-lock-fill text-primary"></i>
+                        Đăng nhập hệ thống
+                    </h6>
+
+                    <div class="mb-2">
+
+                        <input
+                            id="username"
+                            type="text"
+                            class="form-control form-control-sm"
+                            placeholder="Tên đăng nhập">
+
+                    </div>
+
+                    <div class="mb-3">
+
+                        <input
+                            id="password"
+                            type="password"
+                            class="form-control form-control-sm"
+                            placeholder="Mật khẩu">
+
+                    </div>
+
+                    <button
+                        onclick="login()"
+                        class="btn btn-primary btn-sm w-100 rounded-pill">
+
+                        Xác nhận
+
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+    `;
+}
+let currentUser = null;
+
+async function login() {
+
+    const username =
+        document.getElementById("username").value;
+
+    const password =
+        document.getElementById("password").value;
+
+    const res = await fetch("/api/auth/login", {
+
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+            username,
+            password
+        })
+
+    });
+
+    // lỗi server
+    if (!res.ok) {
+
+        alert("Server lỗi");
+
+        return;
+    }
+
+    const user = await res.json();
+
+    // login fail
+    if (!user || !user.username) {
+
+        alert("Sai tài khoản");
+
+        return;
+    }
+
+    currentUser = user;
+    updateAuthUI();
+    // lưu localStorage
+    localStorage.setItem(
+        "user",
+        JSON.stringify(user)
+    );
+
+    // ẩn login
+    document.getElementById("loginBox").style.display = "none";
+
+    alert("Xin chào " + user.username);
+
+    // admin
+    if (user.role === "ADMIN") {
+
+        loadAdminUI();
+
+    } else {
+
+        document.getElementById("chat-messages").innerHTML += `
+
+            <div class="alert alert-success mt-2">
+
+                Xin chào USER:
+                ${user.username}
+
+            </div>
+        `;
+    }
+}
+    window.onload = function () {
+
+    const savedUser =
+        localStorage.getItem("user");
+
+    if (!savedUser) return;
+
+    currentUser =
+        JSON.parse(savedUser);
+
+    console.log("Đã login:", currentUser);
+        updateAuthUI();
+
+    // admin
+    if (currentUser.role === "ADMIN") {
+
+        loadAdminUI();
+
+    }
+};
+    function logout() {
+
+    localStorage.removeItem("user");
+
+    currentUser = null;
+    updateAuthUI();
+    location.reload();
+}
+    function updateAuthUI() {
+
+    const loginBtn =
+        document.getElementById("loginBtn");
+
+    const logoutBtn =
+        document.getElementById("logoutBtn");
+
+    const userInfo =
+        document.getElementById("userInfo");
+
+    if (currentUser) {
+
+        loginBtn.style.display = "none";
+
+        logoutBtn.style.display = "inline-block";
+
+        userInfo.style.display = "inline-block";
+
+        userInfo.innerHTML =
+            currentUser.role === "ADMIN"
+            ? "👑 ADMIN: " + currentUser.username
+            : "👤 " + currentUser.username;
+
+    } else {
+
+        loginBtn.style.display = "inline-block";
+
+        logoutBtn.style.display = "none";
+
+        userInfo.style.display = "none";
+    }
+}
